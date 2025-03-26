@@ -1,0 +1,10 @@
+#framebuffer {
+  border: 1px dotted gray;
+}
+
+#controls {
+  display:flex;
+  align-items: flex-start;
+  flex-direction: column;
+  flex-grow: 0;
+}
