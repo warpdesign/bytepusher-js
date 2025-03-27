@@ -36,16 +36,18 @@ const Screen = {
   buffer: new ImageData(256, 256),
   palette: new Uint32Array(256),
   initPalette() {
+    const view = new DataView(this.palette.buffer)
     let i = 0
     // generate websafe 216 color palette see: https://www.colorhexa.com/web-safe-colors
     for (var r = 0; r <= 0xff; r += 0x33)
       for (var g = 0; g <= 0xff; g += 0x33)
           for (var b = 0; b <= 0xff; b += 0x33)
-              this.palette[i++] = 0xff000000 | b << 16 | g << 8 | r;
+              view.setUint32(i++, r << 24 | g << 16 | b << 8 | 0xff)
 
-    // set colors 216->255 to black as required by BytePusher specs
+    // set colors 216->255 to black as required by BytePusher specs:
+    // this way we may avoid checking for out of bounds colors
     for (let i = 216; i < 256; i++) {
-      this.palette[i] = 0xff000000
+      view.setUint32(i++, 0x000000ff)
     }
   },
   clear() {
