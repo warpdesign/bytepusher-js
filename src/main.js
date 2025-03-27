@@ -6,7 +6,7 @@ const BytePusher = {
   pc: 0,
   mem: new DataView(new ArrayBuffer(0x1000008)),
   setMemory (buffer) {
-    this.mem = new DataView(buffer.slice())
+    this.mem = new DataView(buffer.transfer(0x1000008))
   },
   readUint24(addr) {
     if (addr > 0xFFFFFF) {
