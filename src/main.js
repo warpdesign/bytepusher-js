@@ -36,7 +36,7 @@ const BytePusher = {
     this.mem.setUint16(src, value)
   },
   readByte(addr) {
-    if (addr > 0xFFFFFF) {
+    if (addr > 0xFFFFFF){
       throw new Error('Address out of bounds')
     }
     return this.mem.getUint8(addr)    
@@ -49,6 +49,10 @@ const BytePusher = {
   },
   getFramebufferStartAddress() {
     return this.readByte(5) << 16
+  },
+  getAudioStartAddress() {
+    return this.readUint24(6)
+    // (this.readByte(6) << 16) | (this.readByte(7) << 8)
   }
 }
 
@@ -99,7 +103,7 @@ const Screen = {
   updateBuffer(framebuffer) {
     const length = this.width * this.height
     const array32 = new Uint32Array(this.buffer.data.buffer)
-    const array8 = new Uint8Array(this.buffer.data.buffer)
+
     for (let i = 0; i < length; i++) {
       array32[i] = this.palette[framebuffer[i]]
     }
@@ -107,7 +111,7 @@ const Screen = {
   initPalette() {
     const view = new DataView(this.palette.buffer)
     let i = 0
-    // generate websafe 216 color palette see: https://www.colorhexa.com/web-safe-colors
+    // Generate websafe 216 color palette see: https://www.colorhexa.com/web-safe-colors
     for (var r = 0; r <= 0xff; r += 0x33)
       for (var g = 0; g <= 0xff; g += 0x33)
           for (var b = 0; b <= 0xff; b += 0x33)
@@ -124,6 +128,55 @@ const Screen = {
   },
   draw() {
     this.ctx.putImageData(this.buffer, 0, 0)
+  }
+}
+
+const Audio = {
+  audioCtx: new AudioContext({
+    sampleRate: 15360
+  }),
+  buffer: undefined,
+  source: undefined,
+  currentSample: 0,
+  started: false,
+  updateBuffer(audioBuffer) {
+    const data = this.buffer.getChannelData(0)
+    const start = (this.currentSample + audioBuffer.length) < data.length ? this.currentSample : 0
+    this.currentSample = start + audioBuffer.length
+    for (let i = 0; i < audioBuffer.length; ++i) {
+      data[start + i] = audioBuffer[i] / 128.0
+    }
+  },
+  // buffer duration in seconds
+  init (bufferDuration) {
+    // this is the bytepusher's sample rate
+    const sampleRate = 15360
+    const totalSamples = bufferDuration * sampleRate
+    this.buffer = new AudioBuffer({
+      length: totalSamples,
+      sampleRate,
+      numberOfChannels: 1,
+    })        
+    const source = this.audioCtx.createBufferSource({
+      length: totalSamples,
+      sampleRate,
+      numberOfChannels: 1,
+    })
+    source.buffer = this.buffer
+    source.loop = true
+    source.loopEnd = bufferDuration
+    source.loopStart = 0
+    this.source = source
+  },
+  start() {
+    // Apparently we can't start the source
+    // once it has been started once
+    this.source.connect(this.audioCtx.destination)
+    !this.started && this.source.start()
+    this.started = true
+  },
+  stop() {
+    this.source.disconnect()
   }
 }
 
@@ -153,6 +206,12 @@ const main = () => {
   const setupDOMListeners = () => {
     document.getElementById('toggle_state').addEventListener('click', () => {
       running = !running
+
+      if (running) {
+        Audio.start()
+      } else {
+        Audio.stop()
+      }
       running && requestAnimationFrame(loop)
       updateState()
     })
@@ -167,6 +226,11 @@ const main = () => {
     Keyboard.init()
   }
 
+  const setupSound = () => {
+    // use a 2 seconds-long audio buffer: should be more than enough
+    Audio.init(2)
+  }
+
   const loop = (time) => {
     running && requestAnimationFrame(loop)
 
@@ -178,14 +242,15 @@ const main = () => {
       BytePusher.cpuLoop()
       Screen.updateBuffer(new Uint8Array(BytePusher.mem.buffer, BytePusher.getFramebufferStartAddress()))
       Screen.draw()
-      // TODO: update audio device
+      Audio.updateBuffer(new Int8Array(BytePusher.mem.buffer, BytePusher.getAudioStartAddress(), 256))
     }
   }
 
   setupDOMListeners()
   setupScreen()
   setupKeyboard()
-  loadDemo('demos/keyboard.bp').then(() => {
+  setupSound()
+  loadDemo('demos/audio.bp').then(() => {
     running && requestAnimationFrame(loop)
   })
 }
