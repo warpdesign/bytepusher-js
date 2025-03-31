@@ -1,29 +1,29 @@
-## This is a vanilla JS implementation of the [BytePusher VM](https://esolangs.org/wiki/BytePusher)
+## Vanilla JavaScript Implementation of the [BytePusher VM](https://esolangs.org/wiki/BytePusher)
 
 ## Introduction
 
-The BytePusher is a very simple yet capable Virtual Machine that has a [ByteByteJump](https://esolangs.org/wiki/ByteByteJump) CPU which is a One (1!) instruction CPU.
+The BytePusher is a simple yet capable Virtual Machine that features a [ByteByteJump](https://esolangs.org/wiki/ByteByteJump) CPU, which is a one-instruction CPU.
 
-Here are the full specifications:
+Here are its full specifications:
 
-- CPU: ByteByteJump with 3-byte addresses (Big Endian)
-- CPU speed: 65536 instructions per frame (3932160 instructions per second, ~3.93 MHz).
-- Memory:	16 MiB RAM
-- Graphics:	256*256 pixels, 1 byte per pixel, 216 (that's not a typo!) fixed colors
-- Sound: 8-bit mono, signed values. 256 samples per frame (15360 samples per second)
-- Keyboard:	16 keys, organized into 4 rows by 4 columns
+- **CPU**: ByteByteJump with 3-byte addresses (Big Endian)
+- **CPU Speed**: 65536 instructions per frame (3932160 instructions per second, ~3.93 MHz)
+- **Memory**: 16 MiB RAM
+- **Graphics**: 256×256 pixels, 1 byte per pixel, 216 fixed colors
+- **Sound**: 8-bit mono, signed values, 256 samples per frame (15360 samples per second)
+- **Keyboard**: 16 keys, organized into 4 rows by 4 columns
 
-This is my take at the implementation of this VM in vanilla JavaScript + DOM.
+This project is an implementation of the BytePusher VM in vanilla JavaScript and the DOM. 
 
-The full source code is around 250 lines, including DOM/Web-platform specific code which is quite big compared to other implementations. But the goal was not to generate less code, but rather to learn, and write something easy to read/understand.
+The full source code is approximately 250 lines, including DOM/Web-platform-specific code. While this is larger than some other implementations, the goal was to create something easy to read, understand, and learn from, rather than minimizing code size.
 
 ## Implementing the CPU
 
-### Memory layout and access
+### Memory Layout and Access
 
-Since the CPU is big-endian, I'll be using an ArrayBuffer and either access the memory as byte, or use JavaScript [DataView](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView) so that this code runs properly in little-endian (most computers today) as well as big-endian (who knows? maybe the future is big endian...).
+The CPU is big-endian, so memory is represented using an `ArrayBuffer` and accessed either as bytes or through JavaScript's [DataView](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView). This ensures compatibility with both little-endian (most modern computers) and big-endian systems.
 
-The CPU is a very simple object:
+The CPU is implemented as a simple object:
 
 ```
 const BytePusher = {
@@ -55,67 +55,61 @@ const BytePusher = {
 }
 ```
 
-The memory is stored as a flat 16MiB (0x1000008) ArrayBuffer.
+Memory is a flat 16 MiB (`0x1000008`) `ArrayBuffer`. 
 
-I have added several methods to read/write from memory different byte-sized data: this avoids directly poking into the memory and also correctly handles the fact that this CPU is big endian. Since all DataView methods dealing with 16/32 bit expect big-endian data, there is nothing to do to make the code work on today's x64/aarch64 which are little-endian.
+Methods are provided to read and write memory in different byte sizes. These methods abstract direct memory access and handle the CPU's big-endian nature. Since `DataView` methods for 16/32-bit values already expect big-endian data, the code works seamlessly on little-endian architectures (e.g., x64, ARM).
 
-I added basic bound checks that prevent accessing data outside of the BytePusher's 16MiB address space. Removing them would reduce the code's size.
+Basic bounds checks prevent accessing memory outside the BytePusher's 16 MiB address space. Removing these checks would reduce code size but could lead to undefined behavior.
 
-### CPU Loop: 60fps
+### CPU Loop: 60 FPS
 
-The CPU must be executed 60 times a second and 65536 instructions per frame have to be executed.
+The CPU runs 60 times per second, executing 65536 instructions per frame.
 
-In JavaScript there are several functions that allow to execute code at a particular rate:
+JavaScript provides several ways to execute code at specific intervals:
 
-- setInterval: call a function at least each ms
-- setTimeout: call a function after a minimum delay
-- requestAnimationFrame: request the browser to call a function before the next repaint
+- **`setInterval`**: Calls a function at least every specified millisecond interval. However, calls may not occur in order if the function takes too long to execute.
+- **`setTimeout`**: Calls a function after a minimum delay. Like `setInterval`, it is not very precise.
+- **`requestAnimationFrame`**: Requests the browser to call a function before the next repaint. This is synced to the display's refresh rate, making it ideal for rendering tasks.
 
-`setInterval` calls may not happen in order if the function takes too much time to be executed, plus it's not very precise.
+`requestAnimationFrame` is the best choice for this project. Modern displays often refresh at rates other than 60 Hz (e.g., 120 Hz, 144 Hz), and inactive browser tabs may reduce the refresh rate. The callback receives a timestamp, allowing the CPU loop to run at the correct rate (16.66 ms per frame).
 
-`setTimeout` is not precise either, and the delay may be longer than the request one depending on browser load.
-
-`requestAnimationFrame` is synced to the refresh rate and appear to be the perfect candidate since most displays are refreshed at 60fps. That said, monitors with 120Hz or 140hz refresh rate are more and more common (ProMotion on Mac laptops, most highend smartphones, gaming monitors) so the requestAnimationFrame callback can be called quicker. Since the browser will lower the refresh rate when the tab/browser is not active, it can also be called at a lower rate.
-
-Fortunately, the callback that's called receives a timing parameter that allows to bail out of rendering and only call the method once 16.66ms have passed.
-
-The loop looks like this:
+The loop is implemented as follows:
 
 ```
+let fps = 60
+let lastFrameTime = 0
+let frameDuration = 1000 / fps // ~16.66 ms
+// ...
+const loop = (time) => {
+  running && requestAnimationFrame(loop)
 
-  let fps = 60
-  let lastFrameTime = 0
-  let frameDuration = 1000 / fps // 15.66ms
-  // ...
-  const loop = (time) => {
-    running && requestAnimationFrame(loop)
-
-    const delta = time - lastFrameTime
-    if (delta >= frameDuration)  {
-      lastFrameTime = time - (delta % frameDuration)
-      
-      // update keyboard state
-      // run cpu loop
-      // render graphics
-      // render audio audio
-    }
+  const delta = time - lastFrameTime
+  if (delta >= frameDuration) {
+    lastFrameTime = time - (delta % frameDuration)
+    
+    // Update keyboard state
+    // Run CPU loop
+    // Render graphics
+    // Render audio
   }
+}
 ```
 
-### Executing instructons
-The CPU loop that's executed 60 times a second looks like this:
+### Executing Instructions
+
+The CPU loop, executed 60 times per second, looks like this:
 
 ```
 cpuLoop() {
-    let pc = this.readUint24(2)
-    for (let i = 0; i < 65536; i++) {
-        this.writeByte(pc, pc + 3)
-        pc = this.readUint24(pc + 6)
-    }
-},    
+  let pc = this.readUint24(2)
+  for (let i = 0; i < 65536; i++) {
+    this.writeByte(pc, pc + 3)
+    pc = this.readUint24(pc + 6)
+  }
+},
 ```
 
-Nothing special about it: it reads the source address, then writes to the destination address that's stored at address 3. Finally, it sets the PC (Program Counter) to the address in PC + 6.
+The loop reads the source address, writes to the destination address stored at offset 3, and updates the program counter (PC) to the address at offset 6.
 
 ## Graphics
 
@@ -123,55 +117,49 @@ Nothing special about it: it reads the source address, then writes to the destin
 
 From the documentation:
 
-> 	A value of ZZ means: pixel(XX, YY) is at address ZZYYXX.
+> A value of ZZ means: pixel(XX, YY) is at address ZZYYXX.
 
-Basically it means than `0xZZ0000` is the start address of the framebuffer, and contains the value of pixel (0,0).
-
-Address `0xZZ0100` contains the address of the first pixel of the second scanline (0, 1), and so on...
-
-Since the resolution is `256 x 256` pixels, it means the last pixel of the screen will be at address `0xZZFFFF`.
+This means that `0xZZ0000` is the start address of the framebuffer and contains the value of pixel (0,0). Address `0xZZ0100` contains the value of the first pixel in the second scanline (0,1), and so on. The last pixel of the screen is at address `0xZZFFFF`.
 
 ### Palette
 
-The `pixel` that's stored is the index of the pixel in the [web safe](https://www.colorhexa.com/web-safe-colors) color palette.
-
-In `initPalette` the palette is pre-calculated using Canvas'pixel format `RGBA`:
+The pixel value is an index into the [web-safe color palette](https://www.colorhexa.com/web-safe-colors). The palette is precomputed in `initPalette` using the RGBA format:
 
 ```
 let i = 0
-// Generate websafe 216 color palette see: https://www.colorhexa.com/web-safe-colors
-for (var r = 0; r <= 0xff; r += 0x33)
-    for (var g = 0; g <= 0xff; g += 0x33)
-        for (var b = 0; b <= 0xff; b += 0x33)
-            view.setUint32(i++ * 4, r << 24 | g << 16 | b << 8 | 0xff)
+// Generate web-safe 216-color palette
+for (let r = 0; r <= 0xff; r += 0x33)
+  for (let g = 0; g <= 0xff; g += 0x33)
+    for (let b = 0; b <= 0xff; b += 0x33)
+      view.setUint32(i++ * 4, r << 24 | g << 16 | b << 8 | 0xff)
 ```
 
-Then, drawing the BytePusher's screen on a canvas is as simple as filling the canvas'buffer with the pixel from the palette:
+Drawing the BytePusher screen on a canvas involves filling the canvas buffer with pixels from the palette:
 
 ```
-  updateBuffer(framebuffer) {
-    const length = this.width * this.height
-    const array32 = new Uint32Array(this.buffer.data.buffer)
+updateBuffer(framebuffer) {
+  const length = this.width * this.height
+  const array32 = new Uint32Array(this.buffer.data.buffer)
 
-    for (let i = 0; i < length; i++) {
-      array32[i] = this.palette[framebuffer[i]]
-    }
-  },
+  for (let i = 0; i < length; i++) {
+    array32[i] = this.palette[framebuffer[i]]
+  }
+},
 ```
 
-Note that since there are only 216 possible colors in BytePusher, but the pixel data is a byte so can be up to 255, the palette is set to 256 colors, and colors 216 to 255 are set to black:
+Since BytePusher supports only 216 colors but uses a byte (256 possible values) for pixels, colors 216–255 are set to black:
 
 ```
 for (let i = 216; i < 256; i++) {
-    view.setUint32(i++ * 4, 0x000000ff)
+  view.setUint32(i++ * 4, 0x000000ff)
 }
 ```
 
-Finally, after each cpu loop, the canvas can be updated with the new pixels by calling `ctx.putImageData`:
+After each CPU loop, the canvas is updated with the new pixels using `ctx.putImageData`:
 
 ```
 draw() {
-    this.ctx.putImageData(this.buffer, 0, 0)
+  this.ctx.putImageData(this.buffer, 0, 0)
 }
 ```
 
@@ -179,102 +167,86 @@ draw() {
 
 ### Audio Buffer
 
-BytePusher has a 256 samples signed 8-bit buffer and a sample rate of `15360`Hz.
-Since having an audio buffer as small as 256 bytes would required much precision (requestAnimationFrame calls aren't precise), a 2 second audio buffer is created, and partially filled after each frame. When it's full, it is then filled again from the start.
+BytePusher has a 256-sample, signed 8-bit buffer with a sample rate of 15360 Hz. To handle this, a 2-second audio buffer is created and partially filled after each frame. When full, it loops back to the start.
 
-To have an endless stream of audio, the audio node's loop property is simply set to true and loopEnd to the size of the buffer.
+The audio node's `loop` property is set to `true`, and `loopEnd` is set to the buffer's duration:
 
 ```
-  init (bufferDuration) {
-    // this is the bytepusher's sample rate
-    const sampleRate = 15360
-    const totalSamples = bufferDuration * sampleRate
-    this.buffer = new AudioBuffer({
-      length: totalSamples,
-      sampleRate,
-      numberOfChannels: 1,
-    })        
-    const source = this.audioCtx.createBufferSource({
-      length: totalSamples,
-      sampleRate,
-      numberOfChannels: 1,
-    })
-    source.buffer = this.buffer
-    source.loop = true
-    source.loopEnd = bufferDuration
-    source.loopStart = 0
-    this.source = source
-  },
+init(bufferDuration) {
+  const sampleRate = 15360
+  const totalSamples = bufferDuration * sampleRate
+  this.buffer = new AudioBuffer({
+    length: totalSamples,
+    sampleRate,
+    numberOfChannels: 1,
+  })
+  const source = this.audioCtx.createBufferSource()
+  source.buffer = this.buffer
+  source.loop = true
+  source.loopEnd = bufferDuration
+  source.loopStart = 0
+  this.source = source
+},
 ```
 
-Since the audio cannot start before the user interacts with the page, the source is connected to the destination after a click is detected on the page:
+Audio playback starts after user interaction (e.g., a click).
 
-### Updating the WebAudio buffer
+### Updating the WebAudio Buffer
 
-After each CPU loop, the canvas audio buffer is partially filled with the updated audio data from BytePusher's memory. Since BytePusher's native audio format is 8-bit signed (integer in the [-128,127] range), and WebAudio's 16-bit floating point (32-bit floating point in the [-1.0, 1.0]), the webaudio sample can be converted with the formula:
+After each CPU loop, the audio buffer is updated with new data from BytePusher's memory. BytePusher's 8-bit signed samples (range: [-128, 127]) are converted to WebAudio's 32-bit floating-point format (range: [-1.0, 1.0]) using:
 
-> webaudio_sample = bytepusher_sample / 128.0
+```
+webaudio_sample = bytepusher_sample / 128.0
+```
 
-The update method looks like this:
+The update method:
 
 ```
 updateBuffer(audioBuffer) {
-    const data = this.buffer.getChannelData(0)
-    const start = (this.currentSample + audioBuffer.length) < data.length ? this.currentSample : 0
-    this.currentSample = start + audioBuffer.length
-    for (let i = 0; i < audioBuffer.length; ++i) {
-        data[start + i] = audioBuffer[i] / 128.0
-    }
+  const data = this.buffer.getChannelData(0)
+  const start = (this.currentSample + audioBuffer.length) < data.length ? this.currentSample : 0
+  this.currentSample = start + audioBuffer.length
+  for (let i = 0; i < audioBuffer.length; ++i) {
+    data[start + i] = audioBuffer[i] / 128.0
+  }
 },
 ```
 
 ## Keyboard
 
-The BytePusher's keyboard is a 16 keys keyboard that is stored as two bytes, each bit giving the state of a single key. It means that multiple keys can be pressed at the same time.
+The BytePusher keyboard has 16 keys stored as two bytes, with each bit representing a key's state. Multiple keys can be pressed simultaneously.
 
-To easily convert web key presses to BytePusher's memory, this simple map has been created:
-
-```
-  // map first memory word (16-bit/big endian) to key
-  keymap: {
-    '1': 0x2,
-    '2': 0x4,
-    '3': 0x8,
-    '4': 0x10,
-    '5': 0x20,
-    '6': 0x40,
-    '7': 0x80,
-    '8': 0x100,
-    '9': 0x200,
-    'a': 0x400,
-    'b': 0x800,
-    'c': 0x1000,
-    'd': 0x2000,
-    'e': 0x4000,
-    'f': 0x8000
-  },
-```
-
-Each key maps to its bit, so the entire keyboard state in stored in an integer variable, and setting the pressed/released state of a specific key is as simple as:
+A simple mapping converts web key presses to BytePusher memory:
 
 ```
-    document.addEventListener('keydown', (e) => {
-      const key = this.keymap[e.key]
-      if (typeof key !== 'undefined') {
-        this.keyState |= key
-      }
-    })
-
-    document.addEventListener('keyup', (e) => {
-      const key = this.keymap[e.key]
-      if (typeof key !== 'undefined') {
-        this.keyState &= ~key
-      }
-    })
+keymap: {
+  '1': 0x2, '2': 0x4, '3': 0x8, '4': 0x10,
+  '5': 0x20, '6': 0x40, '7': 0x80, '8': 0x100,
+  '9': 0x200, 'a': 0x400, 'b': 0x800, 'c': 0x1000,
+  'd': 0x2000, 'e': 0x4000, 'f': 0x8000
+},
 ```
 
-Before each CPU loop, the keystate variable is simple written to the 0x5 address of BytePusher:
+Key states are updated on `keydown` and `keyup` events:
 
 ```
-    BytePusher.writeUint16(0, Keyboard.keyState)
+document.addEventListener('keydown', (e) => {
+  const key = this.keymap[e.key]
+  if (key !== undefined) {
+    this.keyState |= key
+  }
+})
+
+document.addEventListener('keyup', (e) => {
+  const key = this.keymap[e.key]
+  if (key !== undefined) {
+    this.keyState &= ~key
+  }
+})
+```
+
+Before each CPU loop, the keyboard state is written to BytePusher memory:
+
+```
+BytePusher.writeUint16(0, Keyboard.keyState)
 ```
